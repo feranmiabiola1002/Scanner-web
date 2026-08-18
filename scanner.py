@@ -317,19 +317,6 @@ class Scanner:
             except:
                 pass
         
-        # ===== SMB =====
-        if port == 445:
-            try:
-                import smbclient
-                try:
-                    shares = smbclient.list_shares(ip, username='guest', password='')
-                    if shares:
-                        attacks['smb'] = f"Shares: {shares}"
-                except:
-                    pass
-            except:
-                pass
-        
         # ===== RDP =====
         if port == 3389:
             try:
