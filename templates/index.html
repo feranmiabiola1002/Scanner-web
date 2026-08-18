@@ -34,6 +34,10 @@
         .attack-details td { color: #ff6b00; font-size: 13px; border-color: #ff6b00; }
         .export-btn { margin-top: 20px; background: #1a1a1a; color: #00ff41; border: 1px solid #00ff41; width: 100%; }
         .hidden { display: none; }
+        .no-results { text-align: center; padding: 40px 20px; }
+        .no-results .icon { font-size: 48px; margin-bottom: 20px; }
+        .no-results h3 { color: #ffaa00; margin-bottom: 10px; }
+        .no-results p { color: #00ff41; opacity: 0.7; }
         @media (max-width: 768px) { header h1 { font-size: 2em; } .summary { flex-direction: column; } table { font-size: 12px; } th, td { padding: 5px; } }
     </style>
 </head>
@@ -43,11 +47,11 @@
         <div class="scanner-box">
             <div class="input-group">
                 <label>Target</label>
-                <input type="text" id="target" placeholder="e.g., 8.8.8.8 or example.com" value="8.8.8.8">
+                <input type="text" id="target" placeholder="e.g., 8.8.8.8 or example.com" value="scanme.nmap.org">
             </div>
             <div class="input-group">
                 <label>Ports</label>
-                <input type="text" id="ports" placeholder="e.g., 80,443,22 or 1-1000" value="80,443,22,21,3306,6379,8080,8443">
+                <input type="text" id="ports" placeholder="e.g., 80,443,22 or 1-1000" value="22,80,443,3306,6379">
             </div>
             <div class="input-group">
                 <label><input type="checkbox" id="attack"> 💀 Attack Mode (Auto-exploit)</label>
@@ -129,17 +133,63 @@
         }
         function displayResults(results) {
             const resultContent = document.getElementById('resultContent');
+            
+            // Check if results is empty or null
+            if (!results || results.length === 0) {
+                resultContent.innerHTML = `
+                    <div class="no-results">
+                        <div class="icon">🔒</div>
+                        <h3>No Open Ports Found</h3>
+                        <p>The target appears to be secure or unreachable.</p>
+                        <p style="margin-top: 10px; color: #ffaa00;">Try scanning a different target like:</p>
+                        <p style="color: #00ff41;">• scanme.nmap.org</p>
+                        <p style="color: #00ff41;">• testphp.vulnweb.com</p>
+                        <p style="color: #00ff41;">• 8.8.8.8</p>
+                    </div>
+                `;
+                return;
+            }
+
             let html = '<div class="result-grid">';
-            const openPorts = results.filter(r => r.port);
-            const vulnPorts = results.filter(r => r.vulnerable);
-            html += `<div class="summary"><div class="stat">📡 Open Ports: ${openPorts.length}</div><div class="stat">💀 Vulnerable: ${vulnPorts.length}</div></div><table><tr><th>Port</th><th>Service</th><th>Banner</th><th>SNI</th><th>Status</th></tr>`;
+            const openPorts = results.filter(r => r && r.port);
+            const vulnPorts = results.filter(r => r && r.vulnerable);
+            
+            if (openPorts.length === 0) {
+                html += `
+                    <div class="no-results">
+                        <div class="icon">🛡️</div>
+                        <h3>No Open Ports Found</h3>
+                        <p>All scanned ports are closed or filtered.</p>
+                        <p style="margin-top: 10px; color: #ffaa00;">Try scanning a different target or port range.</p>
+                    </div>
+                `;
+                resultContent.innerHTML = html;
+                return;
+            }
+            
+            html += `<div class="summary">
+                <div class="stat">📡 Open Ports: ${openPorts.length}</div>
+                <div class="stat">💀 Vulnerable: ${vulnPorts.length}</div>
+                <div class="stat">🔒 SSL Ports: ${results.filter(r => r && r.port && [443,8443,465,993,995].includes(r.port)).length}</div>
+            </div>
+            <table>
+                <tr><th>Port</th><th>Service</th><th>Banner</th><th>SNI</th><th>Status</th></tr>`;
+            
             for (const result of results) {
-                if (!result.port) continue;
+                if (!result || !result.port) continue;
                 const vuln = result.vulnerable ? '💀 VULNERABLE' : '✅ Secure';
                 const vulnClass = result.vulnerable ? 'vuln' : '';
-                html += `<tr class="${vulnClass}"><td><strong>${result.port}</strong></td><td>${result.service || 'Unknown'}</td><td class="banner">${(result.banner || 'N/A').slice(0, 60)}</td><td>${result.sni || 'N/A'}</td><td>${vuln}</td></tr>`;
+                html += `<tr class="${vulnClass}">
+                    <td><strong>${result.port}</strong></td>
+                    <td>${result.service || 'Unknown'}</td>
+                    <td class="banner">${(result.banner || 'N/A').slice(0, 60)}</td>
+                    <td>${result.sni || 'N/A'}</td>
+                    <td>${vuln}</td>
+                </tr>`;
                 if (result.attack_results) {
-                    html += `<tr class="attack-details"><td colspan="5">⚡ Attack Results: ${JSON.stringify(result.attack_results)}</td></tr>`;
+                    html += `<tr class="attack-details">
+                        <td colspan="5">⚡ Attack Results: ${JSON.stringify(result.attack_results)}</td>
+                    </tr>`;
                 }
             }
             html += '</table></div>';
@@ -151,4 +201,4 @@
         }
     </script>
 </body>
-  </html>
+    </html>
