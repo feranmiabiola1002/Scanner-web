@@ -223,23 +223,24 @@ class Scanner:
         if port == 21:
             try:
                 import ftplib
-                ftp = ftplib.FTP(ip)
-                ftp.login('anonymous', 'anonymous')
-                attacks['ftp'] = 'Anonymous login allowed'
-                ftp.quit()
-            except:
-                users = ['admin', 'ftp', 'user', 'test', 'anonymous']
-                passwords = ['', 'password', '123456', 'admin', 'ftp', 'pass']
-                for user in users:
-                    for passwd in passwords:
-                        try:
-                            ftp = ftplib.FTP(ip)
-                            ftp.login(user, passwd)
-                            attacks['ftp'] = f"{user}:{passwd if passwd else '(empty)'}"
-                            ftp.quit()
-                            return attacks
-                        except:
-                            continue
+                try:
+                    ftp = ftplib.FTP(ip)
+                    ftp.login('anonymous', 'anonymous')
+                    attacks['ftp'] = 'Anonymous login allowed'
+                    ftp.quit()
+                except:
+                    users = ['admin', 'ftp', 'user', 'test', 'anonymous']
+                    passwords = ['', 'password', '123456', 'admin', 'ftp', 'pass']
+                    for user in users:
+                        for passwd in passwords:
+                            try:
+                                ftp = ftplib.FTP(ip)
+                                ftp.login(user, passwd)
+                                attacks['ftp'] = f"{user}:{passwd if passwd else '(empty)'}"
+                                ftp.quit()
+                                return attacks
+                            except:
+                                continue
             except:
                 pass
         
@@ -273,7 +274,6 @@ class Scanner:
         # ===== Elasticsearch =====
         if port == 9200:
             try:
-                import requests
                 resp = requests.get(f"http://{ip}:9200/", timeout=3)
                 if resp.status_code == 200:
                     attacks['elasticsearch'] = 'Open - Data accessible'
@@ -285,7 +285,6 @@ class Scanner:
         # ===== HTTP/HTTPS =====
         if port in [80, 443, 8080, 8443]:
             try:
-                import requests
                 protocol = 'https' if port in [443, 8443] else 'http'
                 url = f"{protocol}://{ip}:{port}"
                 
@@ -320,7 +319,6 @@ class Scanner:
         # ===== RDP =====
         if port == 3389:
             try:
-                import socket
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(3)
                 sock.connect((ip, 3389))
