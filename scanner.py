@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MALVRYX Scanner Engine - Enhanced Attack Mode
+MALVRYX Scanner Engine - Enhanced Attack Mode + ISP SNI Probe
 """
 import socket, ssl, threading, time, json, requests, sys, os, ipaddress
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -18,6 +18,7 @@ class Config:
     use_doh: bool = True
     attack_mode: bool = False
     verbose: bool = False
+    probe_sni: bool = False
     
     def __post_init__(self):
         if self.scan_ports is None:
@@ -90,6 +91,7 @@ class Scanner:
         self.config = config
         self.bypass = ISPBypass(config)
         self.results = []
+        self.sni_probe_results = []
         self.lock = threading.Lock()
     
     def scan_port(self, ip: str, port: int) -> Optional[Dict]:
@@ -157,6 +159,69 @@ class Scanner:
         except:
             pass
         return None
+    
+    def probe_sni_blocking(self, target_domain: str, test_domains: List[str] = None) -> Dict:
+        results = {
+            'target': target_domain,
+            'direct_accessible': False,
+            'sni_blocked_domains': [],
+            'accessible_domains': [],
+            'isp_blocking_detected': False
+        }
+        
+        if test_domains is None:
+            test_domains = [
+                'google.com', 'facebook.com', 'youtube.com', 'twitter.com',
+                'instagram.com', 'whatsapp.com', 'tiktok.com', 'telegram.org'
+            ]
+        
+        print(f"\n🔍 SNI Probe: Testing ISP Blocking for {target_domain}")
+        print("=" * 60)
+        
+        try:
+            test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            test_sock.settimeout(5)
+            test_sock.connect((target_domain, 443))
+            test_sock.close()
+            results['direct_accessible'] = True
+            print(f"✅ Direct connection to {target_domain}: ACCESSIBLE")
+        except:
+            print(f"❌ Direct connection to {target_domain}: BLOCKED")
+        
+        known_good_ip = "1.1.1.1"
+        
+        for domain in test_domains:
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(5)
+                sock.connect((known_good_ip, 443))
+                
+                context = ssl.create_default_context()
+                context.check_hostname = False
+                context.verify_mode = ssl.CERT_NONE
+                
+                ssl_sock = context.wrap_socket(sock, server_hostname=domain)
+                ssl_sock.close()
+                
+                results['accessible_domains'].append(domain)
+                print(f"✅ SNI Probe: {domain} → ACCESSIBLE")
+                
+            except Exception as e:
+                results['sni_blocked_domains'].append(domain)
+                print(f"❌ SNI Probe: {domain} → BLOCKED (ISP SNI Filtering detected)")
+        
+        if results['sni_blocked_domains']:
+            results['isp_blocking_detected'] = True
+            print("\n" + "=" * 60)
+            print("🚨 ISP SNI BLOCKING DETECTED!")
+            print(f"Blocked domains: {', '.join(results['sni_blocked_domains'])}")
+            print("=" * 60)
+        else:
+            print("\n" + "=" * 60)
+            print("✅ No SNI blocking detected for tested domains")
+            print("=" * 60)
+        
+        return results
     
     def _try_attack(self, ip: str, port: int, service: str) -> Dict:
         attacks = {}
@@ -282,7 +347,7 @@ class Scanner:
             except:
                 pass
         
-        # ===== HTTP/HTTPS =====
+        # ===== HTTP/HTTPS (UPDATED - Shows REAL 200 OK paths ONLY) =====
         if port in [80, 443, 8080, 8443]:
             try:
                 protocol = 'https' if port in [443, 8443] else 'http'
@@ -293,17 +358,29 @@ class Scanner:
                          '/backup', '/config', '/.git', '/.env', '/.htaccess', '/wp-login.php',
                          '/admin/login', '/adminpanel', '/cp', '/control', '/management']
                 
-                found_paths = []
+                real_paths = []
+                redirected_paths = []
+                forbidden_paths = []
+                
                 for path in paths:
                     try:
-                        resp = requests.get(f"{url}{path}", timeout=3, verify=False)
-                        if resp.status_code in [200, 301, 302, 403]:
-                            found_paths.append(path)
+                        resp = requests.get(f"{url}{path}", timeout=3, verify=False, allow_redirects=False)
+                        
+                        if resp.status_code == 200:
+                            real_paths.append(path)
+                        elif resp.status_code in [301, 302]:
+                            redirected_paths.append(path)
+                        elif resp.status_code == 403:
+                            forbidden_paths.append(path)
                     except:
                         continue
                 
-                if found_paths:
-                    attacks['web'] = f"Paths found: {', '.join(found_paths[:5])}"
+                if real_paths:
+                    attacks['web_real_paths'] = f"✅ REAL (200 OK): {', '.join(real_paths)}"
+                if redirected_paths:
+                    attacks['web_redirects'] = f"🔄 REDIRECTS: {', '.join(redirected_paths[:3])}"
+                if forbidden_paths:
+                    attacks['web_forbidden'] = f"🚫 FORBIDDEN (403): {', '.join(forbidden_paths[:3])}"
                 
                 for path in ['/images', '/uploads', '/files', '/documents', '/data']:
                     try:
@@ -350,6 +427,26 @@ class Scanner:
                     self.results.append(result)
                     self._print_result(result)
                     time.sleep(0.01)
+        
+        if self.config.probe_sni:
+            print("\n" + "=" * 60)
+            print("🚀 Starting SNI Probe for ISP Blocking Detection")
+            print("=" * 60)
+            original_domain = target
+            if self._is_ip(target):
+                original_domain = None
+                try:
+                    original_domain = socket.gethostbyaddr(target)[0]
+                except:
+                    original_domain = target
+            
+            if original_domain:
+                probe_results = self.probe_sni_blocking(original_domain)
+                self.sni_probe_results = probe_results
+                self.results.append({
+                    'type': 'sni_probe',
+                    'results': probe_results
+                })
         
         return self.results
     
