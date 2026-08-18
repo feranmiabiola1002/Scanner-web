@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>MALVRYX Scanner</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #0a0a0a; color: #00ff41; font-family: 'Courier New', monospace; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        header { text-align: center; padding: 30px 0; border-bottom: 2px solid #00ff41; margin-bottom: 40px; }
+        header h1 { font-size: 3em; text-shadow: 0 0 20px #00ff41; letter-spacing: 3px; }
+        header p { color: #00ff41; opacity: 0.7; }
+        .scanner-box { background: #111; border: 1px solid #00ff41; border-radius: 10px; padding: 30px; margin-bottom: 30px; box-shadow: 0 0 30px rgba(0,255,65,0.1); }
+        .input-group { margin-bottom: 20px; }
+        .input-group label { display: block; margin-bottom: 5px; color: #00ff41; font-weight: bold; }
+        .input-group input[type="text"] { width: 100%; padding: 12px; background: #0a0a0a; border: 1px solid #00ff41; color: #00ff41; border-radius: 5px; font-size: 16px; font-family: monospace; }
+        .input-group input[type="checkbox"] { margin-right: 10px; accent-color: #00ff41; }
+        button { background: #00ff41; color: #0a0a0a; border: none; padding: 15px 40px; font-size: 18px; font-weight: bold; border-radius: 5px; cursor: pointer; transition: all 0.3s; font-family: monospace; }
+        button:hover { background: #00cc33; transform: scale(1.02); box-shadow: 0 0 30px rgba(0,255,65,0.3); }
+        .status { margin-top: 20px; padding: 15px; background: #0a0a0a; border: 1px solid #00ff41; border-radius: 5px; font-size: 16px; }
+        .status.error { border-color: #ff0040; color: #ff0040; }
+        .progress-bar { margin-top: 15px; width: 100%; height: 20px; background: #1a1a1a; border-radius: 10px; overflow: hidden; border: 1px solid #00ff41; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #00ff41, #00cc33); transition: width 0.5s; width: 0%; }
+        .results { margin-top: 30px; padding: 20px; background: #111; border: 1px solid #00ff41; border-radius: 10px; }
+        .results h2 { margin-bottom: 20px; text-align: center; }
+        .summary { display: flex; gap: 20px; margin-bottom: 20px; flex-wrap: wrap; }
+        .stat { padding: 10px 20px; background: #0a0a0a; border: 1px solid #00ff41; border-radius: 5px; flex: 1; text-align: center; min-width: 150px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid #00ff41; padding: 10px; text-align: left; }
+        th { background: #0a0a0a; color: #00ff41; }
+        .vuln { background: #1a0000; color: #ff0040; }
+        .vuln td { border-color: #ff0040; }
+        .banner { font-size: 12px; opacity: 0.7; }
+        .attack-details { background: #1a0000; }
+        .attack-details td { color: #ff6b00; font-size: 13px; border-color: #ff6b00; }
+        .export-btn { margin-top: 20px; background: #1a1a1a; color: #00ff41; border: 1px solid #00ff41; width: 100%; }
+        .hidden { display: none; }
+        @media (max-width: 768px) { header h1 { font-size: 2em; } .summary { flex-direction: column; } table { font-size: 12px; } th, td { padding: 5px; } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header><h1>🚀 MALVRYX SCANNER</h1><p>Advanced SNI/IP/Port Scanner with ISP Bypass</p></header>
+        <div class="scanner-box">
+            <div class="input-group">
+                <label>Target</label>
+                <input type="text" id="target" placeholder="e.g., 8.8.8.8 or example.com" value="8.8.8.8">
+            </div>
+            <div class="input-group">
+                <label>Ports</label>
+                <input type="text" id="ports" placeholder="e.g., 80,443,22 or 1-1000" value="80,443,22,21,3306,6379,8080,8443">
+            </div>
+            <div class="input-group">
+                <label><input type="checkbox" id="attack"> 💀 Attack Mode (Auto-exploit)</label>
+            </div>
+            <button onclick="startScan()">🔍 START SCAN</button>
+            <div id="status" class="status hidden"></div>
+            <div class="progress-bar hidden" id="progressBar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+        </div>
+        <div id="results" class="results hidden">
+            <h2>📊 SCAN RESULTS</h2>
+            <div id="resultContent"></div>
+            <button onclick="exportReport()" class="export-btn">📄 Export HTML Report</button>
+        </div>
+    </div>
+    <script>
+        let currentScanId = null;
+        async function startScan() {
+            const target = document.getElementById('target').value.trim();
+            const ports = document.getElementById('ports').value.trim();
+            const attack = document.getElementById('attack').checked;
+            if (!target) { alert('Please enter a target'); return; }
+            const status = document.getElementById('status');
+            const progressBar = document.getElementById('progressBar');
+            const progressFill = document.getElementById('progressFill');
+            status.className = 'status';
+            status.textContent = '🚀 Starting scan...';
+            progressBar.className = 'progress-bar';
+            progressFill.style.width = '0%';
+            try {
+                const response = await fetch('/api/scan', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target, ports, attack })
+                });
+                const data = await response.json();
+                if (data.error) { status.textContent = '❌ ' + data.error; status.className = 'status error'; return; }
+                currentScanId = data.scan_id;
+                pollResults(currentScanId);
+            } catch (error) {
+                status.textContent = '❌ Error: ' + error.message;
+                status.className = 'status error';
+            }
+        }
+        async function pollResults(scanId) {
+            const status = document.getElementById('status');
+            const progressFill = document.getElementById('progressFill');
+            const resultsDiv = document.getElementById('results');
+            const resultContent = document.getElementById('resultContent');
+            const interval = setInterval(async () => {
+                try {
+                    const response = await fetch(`/api/status/${scanId}`);
+                    const data = await response.json();
+                    if (data.status === 'complete') {
+                        clearInterval(interval);
+                        status.textContent = '✅ SCAN COMPLETE!';
+                        progressFill.style.width = '100%';
+                        if (data.results) {
+                            displayResults(data.results);
+                            resultsDiv.className = 'results';
+                        }
+                        return;
+                    }
+                    if (data.status === 'error') {
+                        clearInterval(interval);
+                        status.textContent = '❌ Scan failed';
+                        status.className = 'status error';
+                        return;
+                    }
+                    if (data.progress) {
+                        progressFill.style.width = data.progress + '%';
+                        status.textContent = `⏳ Scanning... ${data.progress}%`;
+                    }
+                } catch (error) {
+                    clearInterval(interval);
+                }
+            }, 1000);
+        }
+        function displayResults(results) {
+            const resultContent = document.getElementById('resultContent');
+            let html = '<div class="result-grid">';
+            const openPorts = results.filter(r => r.port);
+            const vulnPorts = results.filter(r => r.vulnerable);
+            html += `<div class="summary"><div class="stat">📡 Open Ports: ${openPorts.length}</div><div class="stat">💀 Vulnerable: ${vulnPorts.length}</div></div><table><tr><th>Port</th><th>Service</th><th>Banner</th><th>SNI</th><th>Status</th></tr>`;
+            for (const result of results) {
+                if (!result.port) continue;
+                const vuln = result.vulnerable ? '💀 VULNERABLE' : '✅ Secure';
+                const vulnClass = result.vulnerable ? 'vuln' : '';
+                html += `<tr class="${vulnClass}"><td><strong>${result.port}</strong></td><td>${result.service || 'Unknown'}</td><td class="banner">${(result.banner || 'N/A').slice(0, 60)}</td><td>${result.sni || 'N/A'}</td><td>${vuln}</td></tr>`;
+                if (result.attack_results) {
+                    html += `<tr class="attack-details"><td colspan="5">⚡ Attack Results: ${JSON.stringify(result.attack_results)}</td></tr>`;
+                }
+            }
+            html += '</table></div>';
+            resultContent.innerHTML = html;
+        }
+        async function exportReport() {
+            if (!currentScanId) { alert('No scan results to export'); return; }
+            window.location.href = `/api/export/${currentScanId}`;
+        }
+    </script>
+</body>
+  </html>
